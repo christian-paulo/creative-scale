@@ -298,15 +298,16 @@ export default function OnboardingPage() {
   // ── Save steps ──
   const saveStep1 = async () => {
     if (!workspaceId) return
-    await supabase.from('workspaces').update({ mercado, volume_mensal: volume, plataformas }).eq('id', workspaceId)
+    // DB columns: volume (not volume_mensal)
+    await supabase.from('workspaces').update({ mercado, volume, plataformas }).eq('id', workspaceId)
   }
 
   const saveStep2 = async () => {
     if (!workspaceId) return
-    // Save the full MCP URL as-is so the metrics route can use the MCP protocol
-    const keyToSave = dataSource === 'utmify' ? utmifyKey.trim() : null
+    // DB columns: fonte_dados (not data_source); save full MCP URL
     await supabase.from('workspaces').update({
-      utmify_api_key: keyToSave,
+      fonte_dados: dataSource,
+      utmify_api_key: dataSource === 'utmify' ? utmifyKey.trim() : null,
       utmify_connected: utmifyStatus === 'ok',
     }).eq('id', workspaceId)
   }

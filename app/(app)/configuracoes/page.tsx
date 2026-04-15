@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
-import { CheckCircle2, Loader2, X, AlertTriangle } from 'lucide-react'
+import { CheckCircle2, Loader2, X } from 'lucide-react'
 
 const TABS = [
   { id: 'conexao',      label: 'Fonte de dados' },
@@ -17,12 +17,6 @@ const MERCADOS = ['Info-produto', 'Nutraceutico', 'E-commerce', 'SaaS', 'Serviç
 const VOLUMES = ['Até R$5k/mês', 'R$5k – R$20k', 'R$20k – R$50k', 'R$50k – R$100k', 'Acima de R$100k']
 const PLATAFORMAS = ['META Ads', 'Google Ads', 'TikTok Ads', 'Kwai Ads']
 
-function extractToken(input: string): string {
-  if (input.startsWith('http')) {
-    try { return new URL(input).searchParams.get('token') ?? '' } catch { return '' }
-  }
-  return input
-}
 
 export default function ConfiguracoesPage() {
   const supabase = createClient()
@@ -63,16 +57,16 @@ export default function ConfiguracoesPage() {
 
       const { data: ws } = await supabase
         .from('workspaces')
-        .select('id, utmify_api_key, utmify_connected, data_source, mercado, volume_mensal, plataformas')
+        .select('id, utmify_api_key, utmify_connected, fonte_dados, mercado, volume, plataformas')
         .eq('user_id', user.id)
         .single()
       if (!ws) return
 
       setWorkspaceId(ws.id)
       if (ws.utmify_api_key) { setUtmifyKey(ws.utmify_api_key); setUtmifyStatus(ws.utmify_connected ? 'ok' : 'idle') }
-      if (ws.data_source) setDataSource(ws.data_source)
+      if (ws.fonte_dados) setDataSource(ws.fonte_dados)
       if (ws.mercado) setMercado(ws.mercado)
-      if (ws.volume_mensal) setVolume(ws.volume_mensal)
+      if (ws.volume) setVolume(ws.volume)
       if (ws.plataformas?.length) setPlataformas(ws.plataformas)
 
       // Benchmarks
@@ -142,12 +136,18 @@ export default function ConfiguracoesPage() {
     if (!workspaceId) return
     setSaving(true)
     try {
-      const token = extractToken(utmifyKey.trim())
-      await supabase.from('workspaces').update({
-        data_source: dataSource,
-        utmify_api_key: dataSource === 'utmify' ? (token || utmifyKey.trim()) : null,
+      // Save the full MCP URL as-is so metrics route can use the MCP protocol
+      const { error } = await supabase.from('workspaces').update({
+        fonte_dados: dataSource,
+        utmify_api_key: dataSource === 'utmify' ? utmifyKey.trim() : null,
         utmify_connected: utmifyStatus === 'ok',
       }).eq('id', workspaceId)
+
+      if (error) {
+        console.error('saveConexao error:', error)
+        showSaved('Erro ao salvar — tente novamente')
+        return
+      }
       showSaved('Conexão salva')
     } finally {
       setSaving(false)
@@ -192,7 +192,7 @@ export default function ConfiguracoesPage() {
     if (!workspaceId) return
     setSaving(true)
     try {
-      await supabase.from('workspaces').update({ mercado, volume_mensal: volume, plataformas }).eq('id', workspaceId)
+      await supabase.from('workspaces').update({ mercado, volume, plataformas }).eq('id', workspaceId)
       showSaved('Operação salva')
     } finally {
       setSaving(false)
