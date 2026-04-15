@@ -106,6 +106,104 @@ function getPeriodDates(period: Period): { start: string; end: string } {
   }
 }
 
+// ── Output parser ─────────────────────────────────────────────────────────
+type AnalysisCard = { title: string; sub: string; body: string; actions: string[]; badge: string; badgeCls: string }
+
+const TAB_BADGES: Record<string, { badge: string; badgeCls: string }> = {
+  'Reativar agora':    { badge: 'Fazer hoje',     badgeCls: 'bg-green-100 text-green-700' },
+  'Escala horizontal': { badge: 'Alto potencial', badgeCls: 'bg-blue-100 text-blue-700' },
+  'Escala vertical':   { badge: 'Escalar',        badgeCls: 'bg-purple-100 text-purple-700' },
+  'Novos testes':      { badge: 'Testar',         badgeCls: 'bg-amber-100 text-amber-700' },
+  'O que evitar':      { badge: 'Evitar',         badgeCls: 'bg-red-100 text-red-600' },
+  'Comparativo A/B':   { badge: 'Comparativo',    badgeCls: 'bg-blue-100 text-blue-700' },
+  'Veredicto':         { badge: 'Veredicto',      badgeCls: 'bg-green-100 text-green-700' },
+  'Próximos passos':   { badge: 'Próximo passo',  badgeCls: 'bg-amber-100 text-amber-700' },
+}
+
+function parseOutput(raw: string, tabs: string[]): AnalysisCard[][] {
+  // Split by ## headings to get sections
+  const sectionRegex = /^##\s+(.+)$/gm
+  const sections: { name: string; content: string }[] = []
+
+  let lastIndex = 0
+  let lastMatch: RegExpExecArray | null = null
+
+  let m: RegExpExecArray | null
+  while ((m = sectionRegex.exec(raw)) !== null) {
+    if (lastMatch) {
+      sections.push({ name: lastMatch[1].trim(), content: raw.slice(lastIndex, m.index).trim() })
+    }
+    lastMatch = m
+    lastIndex = m.index + m[0].length
+  }
+  if (lastMatch) {
+    sections.push({ name: lastMatch[1].trim(), content: raw.slice(lastIndex).trim() })
+  }
+
+  // Map each tab to its parsed cards
+  return tabs.map(tab => {
+    const sec = sections.find(s => s.name.toLowerCase().includes(tab.toLowerCase().slice(0, 8)))
+    if (!sec) return []
+    return parseSection(sec.content, tab)
+  })
+}
+
+function parseSection(content: string, tabName: string): AnalysisCard[] {
+  const { badge, badgeCls } = TAB_BADGES[tabName] ?? { badge: 'Ação', badgeCls: 'bg-slate-100 text-slate-600' }
+  const cards: AnalysisCard[] = []
+
+  // Split into blocks by bold headings (**...**)
+  const blocks = content.split(/(?=\*\*[^*]+\*\*)/).filter(b => b.trim())
+
+  for (const block of blocks) {
+    const lines = block.split('\n')
+    let title = ''
+    const bodyLines: string[] = []
+    const actions: string[] = []
+
+    for (const line of lines) {
+      const stripped = line.trim()
+      if (!stripped) continue
+
+      // Title: **something**
+      const titleMatch = stripped.match(/^\*\*(.+?)\*\*/)
+      if (titleMatch && !title) {
+        title = titleMatch[1].trim()
+        // Rest of line after the bold
+        const rest = stripped.slice(titleMatch[0].length).trim()
+        if (rest) bodyLines.push(rest)
+        continue
+      }
+
+      // Action item: starts with -, →, •, or digit.
+      if (/^[-→•]/.test(stripped) || /^\d+\./.test(stripped)) {
+        actions.push(stripped.replace(/^[-→•]\s*/, '').replace(/^\d+\.\s*/, ''))
+      } else {
+        bodyLines.push(stripped)
+      }
+    }
+
+    if (!title && bodyLines.length > 0) {
+      // No bold title — treat first line as title
+      title = bodyLines.shift() ?? ''
+    }
+
+    if (!title) continue
+
+    // First body line may be a subtitle-ish sentence (short) — use as sub
+    let sub = ''
+    let body = bodyLines.join(' ').trim()
+    if (bodyLines.length > 1 && bodyLines[0].length < 100) {
+      sub = bodyLines[0]
+      body = bodyLines.slice(1).join(' ').trim()
+    }
+
+    cards.push({ title, sub, body, actions, badge, badgeCls })
+  }
+
+  return cards
+}
+
 // ── Step dot component ─────────────────────────────────────────────────────
 function StepDot({ n, current }: { n: number; current: number }) {
   const done   = n < current
@@ -585,13 +683,62 @@ export default function AnalisePage() {
                       </div>
                     )}
 
-                    {/* Output text */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 min-h-40">
-                      <div className="text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                        {output}
-                        {generating && <span className="inline-block w-2 h-4 bg-green-600 animate-pulse ml-0.5" />}
+                    {/* Output — streaming: raw text; done: parsed cards */}
+                    {generating && (
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 min-h-40">
+                        <div className="text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">
+                          {output}
+                          <span className="inline-block w-2 h-4 bg-green-600 animate-pulse ml-0.5" />
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {done && (() => {
+                      const parsed = parseOutput(output, tabs)
+                      const cards  = parsed[activeTab] ?? []
+                      return cards.length > 0 ? (
+                        <div className="space-y-3">
+                          {cards.map((card, i) => (
+                            <div key={i} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                              {/* Card header */}
+                              <div className="flex items-start justify-between gap-3 p-4 pb-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[13.5px] font-semibold text-slate-900 leading-snug">{card.title}</div>
+                                  {card.sub && <div className="text-[11.5px] text-slate-400 mt-0.5">{card.sub}</div>}
+                                </div>
+                                <span className={cn('text-[10.5px] font-bold px-2.5 py-1 rounded-full flex-shrink-0', card.badgeCls)}>
+                                  {card.badge}
+                                </span>
+                              </div>
+
+                              {/* Card body */}
+                              {card.body && (
+                                <div className="px-4 pb-3 text-[12.5px] text-slate-600 leading-relaxed">
+                                  {card.body}
+                                </div>
+                              )}
+
+                              {/* Action list */}
+                              {card.actions.length > 0 && (
+                                <div className="border-t border-slate-100 px-4 py-3 space-y-2">
+                                  {card.actions.map((action, j) => (
+                                    <div key={j} className="flex items-start gap-2">
+                                      <span className="text-green-500 font-bold mt-0.5 flex-shrink-0 text-[12px]">→</span>
+                                      <span className="text-[12.5px] text-slate-700 leading-snug">{action}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        // Fallback: if parsing yields nothing, show raw
+                        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                          <div className="text-[13px] text-slate-600 leading-relaxed whitespace-pre-wrap">{output}</div>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 

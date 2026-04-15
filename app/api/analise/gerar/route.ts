@@ -83,26 +83,31 @@ Tipo: ${atype}
 Etapa: ${stage}
 Período: ${period_start} a ${period_end}
 
-Analise os dados acima e gere recomendações práticas e específicas.
-Organize a resposta nas seguintes seções:
+Organize a resposta EXATAMENTE neste formato — sem variações de estrutura:
 
 ## Reativar agora
-Elementos/campanhas que merecem reativação imediata e por quê.
-
 ## Escala horizontal
-O que ampliar para outros públicos/canais.
-
 ## Escala vertical
-O que aumentar em budget e critérios.
-
 ## Novos testes
-Hipóteses prioritárias para testar.
-
 ## O que evitar
-Padrões negativos identificados.
 
-Cada recomendação deve ter: título em negrito, explicação baseada nos dados e ações específicas com nomenclaturas reais quando disponíveis.
-Seja direto, prático e baseado em dados. Evite jargões e generalizações.`
+(Para análise A/B substitua por: ## Comparativo A/B / ## Veredicto / ## Próximos passos)
+
+Dentro de cada seção, use este padrão para CADA recomendação:
+
+**Título curto e específico**
+Uma ou duas frases de contexto com dados concretos do período.
+
+→ Ação específica 1 com nomenclaturas reais quando disponíveis
+→ Ação específica 2
+→ Ação específica 3
+
+REGRAS:
+- 1 a 3 recomendações por seção
+- Títulos SEMPRE em negrito (**assim**), nunca com # ou outros marcadores
+- Ações SEMPRE com → (seta), nunca com traço, asterisco ou número
+- Sem introduções, sumários ou texto fora das seções
+- Use os dados reais fornecidos — não invente números`
 
     const stream = await anthropic.messages.stream({
       model: 'claude-sonnet-4-5',
