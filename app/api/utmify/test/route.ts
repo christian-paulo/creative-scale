@@ -2,15 +2,38 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 15
 
+/**
+ * Accepts either:
+ *   - A plain token:  "BdNc4uBkEUUyVma1QSaDD2a3hmx4Ew6"
+ *   - An MCP URL:    "https://mcp.utmify.com.br/mcp/?token=BdNc4uBkEUUyVma1QSaDD2a3hmx4Ew6"
+ */
+function extractToken(input: string): string {
+  if (input.startsWith('http')) {
+    try {
+      const url = new URL(input)
+      return url.searchParams.get('token') ?? ''
+    } catch {
+      return ''
+    }
+  }
+  return input
+}
+
 export async function POST(request: Request) {
   try {
     const { api_key } = await request.json()
 
-    if (!api_key || typeof api_key !== 'string' || api_key.trim().length < 10) {
-      return NextResponse.json({ success: false, error: 'API key inválida' }, { status: 400 })
+    if (!api_key || typeof api_key !== 'string') {
+      return NextResponse.json({ success: false, error: 'API key obrigatória' }, { status: 400 })
     }
 
-    const key = api_key.trim()
+    // Accept both plain token and full MCP URL formats:
+    // https://mcp.utmify.com.br/mcp/?token=TOKEN
+    const key = extractToken(api_key.trim())
+
+    if (!key || key.length < 8) {
+      return NextResponse.json({ success: false, error: 'Token inválido. Cole a URL MCP ou o token diretamente.' }, { status: 400 })
+    }
 
     // Single request with hard timeout — avoids freeze
     const controller = new AbortController()
@@ -51,7 +74,8 @@ export async function POST(request: Request) {
       data?.campaigns?.length ??
       0
 
-    return NextResponse.json({ success: true, campaigns_count, overview: data })
+    // Return the clean token so the frontend saves just the token, not the full URL
+    return NextResponse.json({ success: true, campaigns_count, overview: data, token: key })
   } catch (error: unknown) {
     console.error('UTMify test error:', error)
 

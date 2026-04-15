@@ -64,6 +64,7 @@ export default function OnboardingPage() {
   // Step 2
   const [dataSource, setDataSource] = useState<'utmify' | 'platform' | 'manual'>('utmify')
   const [utmifyKey, setUtmifyKey] = useState('')
+  const [utmifyToken, setUtmifyToken] = useState('') // token limpo extraído da URL ou direto
   const [utmifyStatus, setUtmifyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [utmifyCount, setUtmifyCount] = useState(0)
   const [utmifyError, setUtmifyError] = useState('')
@@ -130,6 +131,8 @@ export default function OnboardingPage() {
       if (data.success) {
         setUtmifyStatus('ok')
         setUtmifyCount(data.campaigns_count ?? 0)
+        // Save the clean token (extracted from URL if needed)
+        if (data.token) setUtmifyToken(data.token)
       } else {
         setUtmifyStatus('error')
         setUtmifyError(data.error ?? 'API key inválida. Verifique e tente novamente.')
@@ -156,9 +159,13 @@ export default function OnboardingPage() {
 
   const saveStep2 = async () => {
     if (!workspaceId) return
+    // Save the clean token (not the full MCP URL)
+    const tokenToSave = dataSource === 'utmify'
+      ? (utmifyToken || utmifyKey).trim()
+      : null
     await supabase.from('workspaces').update({
       data_source: dataSource,
-      utmify_api_key: dataSource === 'utmify' ? utmifyKey : null,
+      utmify_api_key: tokenToSave,
       utmify_connected: utmifyStatus === 'ok',
     }).eq('id', workspaceId)
   }
@@ -382,10 +389,11 @@ export default function OnboardingPage() {
 
                 {dataSource === 'utmify' && (
                   <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <Label className="text-sm font-medium text-slate-700">API Key da UTMify</Label>
+                    <Label className="text-sm font-medium text-slate-700">Token da UTMify</Label>
+                    <p className="text-xs text-slate-500">Cole a URL MCP completa ou apenas o token</p>
                     <div className="flex gap-2">
                       <Input
-                        placeholder="Cole sua API key aqui"
+                        placeholder="https://mcp.utmify.com.br/mcp/?token=... ou o token diretamente"
                         value={utmifyKey}
                         onChange={(e) => {
                           setUtmifyKey(e.target.value)
