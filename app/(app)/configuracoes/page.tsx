@@ -126,7 +126,8 @@ export default function ConfiguracoesPage() {
       const data = await res.json()
       if (data.success) {
         setUtmifyStatus('ok')
-        setUtmifyCount(data.campaigns_count ?? 0)
+        setUtmifyCount(data.tools_count ?? data.campaigns_count ?? 0)
+        if (data.mcp_url) setUtmifyKey(data.mcp_url)
       } else {
         setUtmifyStatus('error')
         setUtmifyError(data.error ?? 'Erro ao conectar.')
@@ -294,7 +295,7 @@ export default function ConfiguracoesPage() {
                   {utmifyStatus === 'ok' && (
                     <div className="flex items-center gap-2 mt-2 text-[12px] text-green-700 bg-green-50 px-3 py-2 rounded-lg">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      Conectado — {utmifyCount} campanha{utmifyCount !== 1 ? 's' : ''} encontrada{utmifyCount !== 1 ? 's' : ''}
+                      Servidor MCP conectado — {utmifyCount > 0 ? `${utmifyCount} ferramentas disponíveis` : 'conexão verificada'}
                     </div>
                   )}
                   {utmifyStatus === 'error' && (

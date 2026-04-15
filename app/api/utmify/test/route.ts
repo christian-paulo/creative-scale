@@ -1,132 +1,74 @@
 import { NextResponse } from 'next/server'
+import { mcpInitialize, mcpListTools } from '@/lib/utmify-mcp'
 
-export const maxDuration = 15
+export const maxDuration = 20
 
-function extractToken(input: string): string {
+/**
+ * Validates a UTMify MCP URL by running the MCP initialize handshake
+ * and listing available tools.
+ *
+ * Accepts:
+ *   - Full MCP URL: "https://mcp.utmify.com.br/mcp/?token=TOKEN"
+ *   - Plain token:  "TOKEN"  (we build the URL automatically)
+ */
+function normalizeMcpUrl(input: string): string {
   const trimmed = input.trim()
-  if (trimmed.startsWith('http')) {
-    try {
-      const url = new URL(trimmed)
-      // Try ?token= param first
-      const tokenParam = url.searchParams.get('token')
-      if (tokenParam) return tokenParam.trim()
-      // Try /token/ path segment
-      const parts = url.pathname.split('/').filter(Boolean)
-      const tokenIdx = parts.findIndex(p => p === 'token')
-      if (tokenIdx !== -1 && parts[tokenIdx + 1]) return parts[tokenIdx + 1].trim()
-    } catch {
-      // fall through
-    }
-  }
-  return trimmed
+  if (trimmed.startsWith('http')) return trimmed
+  // Plain token → build standard UTMify MCP URL
+  return `https://mcp.utmify.com.br/mcp/?token=${encodeURIComponent(trimmed)}`
 }
-
-const today = () => new Date().toISOString().split('T')[0]
-const weekAgo = () => {
-  const d = new Date()
-  d.setDate(d.getDate() - 7)
-  return d.toISOString().split('T')[0]
-}
-
-// Endpoints to try in order — some plans may not have access to all
-const ENDPOINTS = [
-  `https://api.utmify.com.br/api-credentials/orders?start_date=${weekAgo()}&end_date=${today()}`,
-  `https://api.utmify.com.br/api-credentials/ads/campaigns?start_date=${weekAgo()}&end_date=${today()}`,
-  `https://api.utmify.com.br/api-credentials/dashboard/overview?start_date=${weekAgo()}&end_date=${today()}`,
-  `https://api.utmify.com.br/api-credentials/dashboard/overview`,
-]
 
 export async function POST(request: Request) {
   try {
     const { api_key } = await request.json()
 
-    if (!api_key || typeof api_key !== 'string') {
-      return NextResponse.json({ success: false, error: 'API key obrigatória' }, { status: 400 })
+    if (!api_key || typeof api_key !== 'string' || api_key.trim().length < 8) {
+      return NextResponse.json({ success: false, error: 'Cole a URL MCP ou o token fornecido pela UTMify.' }, { status: 400 })
     }
 
-    const key = extractToken(api_key)
+    const mcpUrl = normalizeMcpUrl(api_key)
 
-    if (!key || key.length < 8) {
-      return NextResponse.json({
-        success: false,
-        error: 'Token inválido. Cole a URL MCP completa ou o token direto.',
-      }, { status: 400 })
-    }
-
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 12000)
-
-    let lastStatus = 0
-    let lastBody = ''
-
+    // Step 1: MCP initialize handshake
+    let serverInfo: unknown
     try {
-      for (const url of ENDPOINTS) {
-        let res: Response
-        try {
-          res = await fetch(url, {
-            headers: {
-              'x-api-token': key,
-              'Accept': 'application/json',
-            },
-            signal: controller.signal,
-          })
-        } catch {
-          continue
-        }
+      serverInfo = await mcpInitialize(mcpUrl)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const status = (err as { status?: number }).status
 
-        lastStatus = res.status
-
-        if (res.ok) {
-          const data = await res.json().catch(() => ({}))
-          const items = Array.isArray(data) ? data : (data?.data ?? data?.orders ?? [])
-          const count = Array.isArray(items) ? items.length : 0
-          return NextResponse.json({ success: true, campaigns_count: count, token: key })
-        }
-
-        // Read body for debugging — don't expose to user but use for better messages
-        try { lastBody = await res.text() } catch { lastBody = '' }
-
-        // 401/403 means auth failure — token is wrong, no point trying other endpoints
-        if (res.status === 401 || res.status === 403) break
-        // 404 means endpoint not found — try next
-        if (res.status === 404) continue
+      if (status === 401 || status === 403 || msg.includes('401') || msg.includes('403')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Token inválido. Cole a URL MCP completa que a UTMify fornece (começa com https://mcp.utmify.com.br/).',
+        })
       }
-    } finally {
-      clearTimeout(timeoutId)
-    }
-
-    // Build helpful error based on what we got
-    if (lastStatus === 401 || lastStatus === 403) {
       return NextResponse.json({
         success: false,
-        error:
-          'Token rejeitado pela UTMify. Certifique-se de copiar o token de API REST ' +
-          '(UTMify → Configurações → API → Chave de API), não a URL MCP do Claude/ChatGPT.',
+        error: `Não foi possível conectar ao servidor MCP da UTMify: ${msg}`,
       })
     }
 
-    if (lastStatus === 404) {
-      return NextResponse.json({
-        success: false,
-        error: 'Nenhum endpoint UTMify respondeu. Tente copiar apenas o token, sem a URL completa.',
-      })
+    // Step 2: List available tools to confirm connection and discover capabilities
+    let tools: { name: string }[] = []
+    try {
+      tools = await mcpListTools(mcpUrl)
+    } catch {
+      // tools/list failing is non-fatal — connection is already confirmed by initialize
     }
 
     return NextResponse.json({
-      success: false,
-      error: `UTMify retornou status ${lastStatus}. Tente novamente ou contate o suporte.`,
+      success: true,
+      mcp_url: mcpUrl,
+      tools_count: tools.length,
+      tools: tools.map(t => t.name),
+      server: serverInfo,
     })
 
   } catch (error: unknown) {
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === 'AbortError' || error.message.includes('abort'))
-
+    const isTimeout = error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort'))
     return NextResponse.json({
       success: false,
-      error: isTimeout
-        ? 'Tempo limite excedido. Verifique sua conexão.'
-        : 'Erro inesperado ao conectar com UTMify.',
+      error: isTimeout ? 'Tempo limite excedido. Verifique sua conexão.' : 'Erro inesperado.',
     })
   }
 }

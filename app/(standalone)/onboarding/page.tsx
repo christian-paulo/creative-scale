@@ -252,8 +252,9 @@ export default function OnboardingPage() {
       const data = await res.json()
       if (data.success) {
         setUtmifyStatus('ok')
-        setUtmifyCount(data.campaigns_count ?? 0)
-        if (data.token) setUtmifyToken(data.token)
+        setUtmifyCount(data.tools_count ?? data.campaigns_count ?? 0)
+        // Store the full MCP URL (normalized by the server) so we save it correctly
+        if (data.mcp_url) setUtmifyKey(data.mcp_url)
       } else {
         setUtmifyStatus('error')
         setUtmifyError(data.error ?? 'API key inválida. Verifique e tente novamente.')
@@ -302,10 +303,10 @@ export default function OnboardingPage() {
 
   const saveStep2 = async () => {
     if (!workspaceId) return
-    const tokenToSave = dataSource === 'utmify' ? (utmifyToken || utmifyKey).trim() : null
+    // Save the full MCP URL as-is so the metrics route can use the MCP protocol
+    const keyToSave = dataSource === 'utmify' ? utmifyKey.trim() : null
     await supabase.from('workspaces').update({
-      data_source: dataSource,
-      utmify_api_key: tokenToSave,
+      utmify_api_key: keyToSave,
       utmify_connected: utmifyStatus === 'ok',
     }).eq('id', workspaceId)
   }
@@ -636,7 +637,7 @@ export default function OnboardingPage() {
                     {utmifyStatus === 'ok' && (
                       <p className="text-sm text-green-600 flex items-center gap-1.5">
                         <CheckCircle2 className="w-4 h-4" />
-                        Conectado com sucesso — {utmifyCount > 0 ? `${utmifyCount.toLocaleString('pt-BR')} campanhas encontradas nos últimos 90 dias` : 'conta verificada'}
+                        Servidor MCP conectado — {utmifyCount > 0 ? `${utmifyCount} ferramentas disponíveis` : 'conexão verificada'}
                       </p>
                     )}
                     {utmifyStatus === 'testing' && (
