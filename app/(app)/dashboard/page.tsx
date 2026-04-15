@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
-import { formatCurrency, formatRoas, formatPercent } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { DateRange } from '@/types'
 
@@ -34,7 +34,6 @@ type Metrics = {
   faturamento: number
 }
 
-// Ação badge colors
 const ACAO_COLORS: Record<string, string> = {
   Escalar:   'bg-green-100 text-green-700',
   Monitorar: 'bg-blue-100 text-blue-700',
@@ -42,9 +41,8 @@ const ACAO_COLORS: Record<string, string> = {
   Pausar:    'bg-red-100 text-red-700',
 }
 
-// Hourly sales pattern — static pattern shape, numbers scaled to period
 const HOURS = ['06h','08h','10h','12h','14h','16h','18h','20h','22h','00h']
-const PATTERN = [5, 8, 18, 22, 30, 38, 52, 88, 100, 62] // normalized 0-100
+const PATTERN = [5, 8, 18, 22, 30, 38, 52, 88, 100, 62]
 
 function SalesSparkline() {
   const w = 500, h = 100, pad = 8
@@ -55,7 +53,7 @@ function SalesSparkline() {
   })
   const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
   const areaPath = linePath + ` L${pts[pts.length-1].x},${h} L${pts[0].x},${h} Z`
-  const peak = pts[7] // 20h index
+  const peak = pts[7]
 
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h + 20}`} className="overflow-visible">
@@ -86,6 +84,7 @@ export default function DashboardPage() {
   const [dateRange, setDateRange] = useState<DateRange>(getDefaultRange())
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<Metrics | null>(null)
+  const [connected, setConnected] = useState<boolean | null>(null)
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [alerts, setAlerts] = useState<{ id: string; tipo: string; titulo: string; descricao: string; meta?: string }[]>([])
 
@@ -101,9 +100,19 @@ export default function DashboardPage() {
     try {
       const start = dateRange.from.toISOString().split('T')[0]
       const end = dateRange.to.toISOString().split('T')[0]
-      const res = await fetch(`/api/utmify/metrics?start=${start}&end=${end}&level=overview`)
+      const res = await fetch(`/api/utmify/metrics?start=${start}&end=${end}&level=campaigns`)
       const data = await res.json()
-      const s = data.summary ?? {}
+
+      setConnected(data.connected ?? false)
+
+      const s = data.summary
+      if (!s) {
+        setMetrics(null)
+        setCampaigns([])
+        setLoading(false)
+        return
+      }
+
       const revenue = s.revenue ?? 0
       const spend = s.spend ?? 0
       const lucro = revenue - spend
@@ -118,12 +127,13 @@ export default function DashboardPage() {
         faturamento: revenue,
       })
 
-      // Campaigns from metrics API
-      if (data.campaigns && Array.isArray(data.campaigns)) {
-        const sorted = [...data.campaigns]
-          .sort((a: any, b: any) => (b.roas ?? 0) - (a.roas ?? 0))
+      // Campaigns from items array
+      const items: any[] = Array.isArray(data.items) ? data.items : []
+      if (items.length > 0) {
+        const sorted = [...items]
+          .sort((a, b) => (b.roas ?? 0) - (a.roas ?? 0))
           .slice(0, 5)
-          .map((c: any): Campaign => {
+          .map((c): Campaign => {
             const roas = c.roas ?? 0
             let acao: Campaign['acao'] = 'Monitorar'
             if (roas >= 3) acao = 'Escalar'
@@ -135,15 +145,19 @@ export default function DashboardPage() {
               sub: c.objective ?? c.status ?? '',
               roas,
               cpa: c.cpa ?? 0,
-              vendas: c.conversions ?? 0,
-              gasto_dia: c.spend_per_day ?? (c.spend ?? 0),
+              vendas: c.conversions ?? c.sales ?? c.vendas ?? 0,
+              gasto_dia: c.spend_per_day ?? c.spend ?? 0,
               acao,
             }
           })
         setCampaigns(sorted)
+      } else {
+        setCampaigns([])
       }
     } catch (err) {
       console.error('Failed to load metrics:', err)
+      setConnected(false)
+      setMetrics(null)
     }
     setLoading(false)
   }, [dateRange])
@@ -174,15 +188,15 @@ export default function DashboardPage() {
     loadAlerts()
   }, [])
 
-  const kpis = metrics ? [
-    { label: 'ROAS',          value: `${metrics.roas.toFixed(2)}×`,    good: metrics.roas >= 2,   bad: metrics.roas < 1.5,  delta: '+0.41 vs sem. ant.' },
-    { label: 'Lucro líquido', value: formatCurrency(metrics.lucro),    good: metrics.lucro > 0,   bad: metrics.lucro < 0,   delta: '+12.3%' },
-    { label: 'CPA médio',     value: formatCurrency(metrics.cpa),      good: false,               bad: false,               delta: '−R$3,10' },
-    { label: 'Margem',        value: `${metrics.margem.toFixed(1)}%`,  good: metrics.margem > 30, bad: metrics.margem < 10, delta: '−1.8%' },
-    { label: 'Gasto total',   value: formatCurrency(metrics.gasto),    good: false,               bad: false,               delta: '+2.1%' },
-    { label: 'Tx. reembolso', value: `${metrics.reembolso.toFixed(1)}%`, good: false,             bad: metrics.reembolso > 5, delta: '−0.4%' },
-    { label: 'Vendas aprov.', value: metrics.vendas.toLocaleString('pt-BR'), good: true,          bad: false,               delta: '+8.7%' },
-  ] : []
+  const KPI_DEFS = [
+    { label: 'ROAS',          getValue: (m: Metrics) => `${m.roas.toFixed(2)}×`,    isGood: (m: Metrics) => m.roas >= 2,   isBad: (m: Metrics) => m.roas < 1.5 },
+    { label: 'Lucro líquido', getValue: (m: Metrics) => formatCurrency(m.lucro),    isGood: (m: Metrics) => m.lucro > 0,   isBad: (m: Metrics) => m.lucro < 0 },
+    { label: 'CPA médio',     getValue: (m: Metrics) => formatCurrency(m.cpa),      isGood: () => false,                   isBad: () => false },
+    { label: 'Margem',        getValue: (m: Metrics) => `${m.margem.toFixed(1)}%`,  isGood: (m: Metrics) => m.margem > 30, isBad: (m: Metrics) => m.margem < 10 },
+    { label: 'Gasto total',   getValue: (m: Metrics) => formatCurrency(m.gasto),    isGood: () => false,                   isBad: () => false },
+    { label: 'Tx. reembolso', getValue: (m: Metrics) => `${m.reembolso.toFixed(1)}%`, isGood: () => false,                isBad: (m: Metrics) => m.reembolso > 5 },
+    { label: 'Vendas aprov.', getValue: (m: Metrics) => m.vendas.toLocaleString('pt-BR'), isGood: () => true,             isBad: () => false },
+  ]
 
   const alertDotClass: Record<string, string> = {
     urgente: 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.8)]',
@@ -196,17 +210,42 @@ export default function DashboardPage() {
 
       <main className="flex-1 p-5 overflow-y-auto space-y-4">
 
+        {/* ── Not connected banner ── */}
+        {!loading && connected === false && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex items-center gap-3">
+            <div className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+            <p className="text-[13px] text-amber-800">
+              UTMify não conectada. Configure em{' '}
+              <a href="/configuracoes" className="font-semibold underline underline-offset-2">Configurações</a>{' '}
+              para ver dados reais.
+            </p>
+          </div>
+        )}
+
         {/* ── KPI Grid ── */}
         <div className="grid grid-cols-7 gap-2.5">
           {loading
             ? Array.from({ length: 7 }).map((_, i) => (
                 <div key={i} className="h-24 rounded-xl bg-slate-100 animate-pulse" />
               ))
-            : kpis.map((k) => (
+            : KPI_DEFS.map((k) => (
                 <div key={k.label} className="bg-white border border-slate-200 rounded-xl p-3.5 hover:border-slate-300 transition-colors">
                   <div className="text-[10.5px] font-medium text-slate-400 uppercase tracking-wider mb-2">{k.label}</div>
-                  <div className="font-bold text-slate-900 text-[18px] leading-none mb-1.5" style={{ fontFamily: 'var(--font-syne, system-ui)' }}>{k.value}</div>
-                  <div className={`text-[11px] font-medium ${k.good ? 'text-green-600' : k.bad ? 'text-red-500' : 'text-slate-400'}`}>{k.delta}</div>
+                  {metrics ? (
+                    <>
+                      <div
+                        className="font-bold text-slate-900 text-[18px] leading-none mb-1.5"
+                        style={{ fontFamily: 'var(--font-syne, system-ui)' }}
+                      >
+                        {k.getValue(metrics)}
+                      </div>
+                      <div className={`text-[11px] font-medium ${k.isGood(metrics) ? 'text-green-600' : k.isBad(metrics) ? 'text-red-500' : 'text-slate-400'}`}>
+                        —
+                      </div>
+                    </>
+                  ) : (
+                    <div className="font-bold text-slate-300 text-[18px] leading-none">—</div>
+                  )}
                 </div>
               ))}
         </div>
@@ -228,9 +267,16 @@ export default function DashboardPage() {
             <div className="overflow-x-auto">
               {loading ? (
                 <div className="p-5 space-y-3">{Array.from({length:5}).map((_,i)=><div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse"/>)}</div>
+              ) : !connected ? (
+                <div className="p-8 text-center">
+                  <p className="text-sm text-slate-400 mb-2">Sem dados disponíveis.</p>
+                  <a href="/configuracoes" className="text-xs font-medium text-blue-600 underline underline-offset-2">
+                    Conectar UTMify em Configurações
+                  </a>
+                </div>
               ) : campaigns.length === 0 ? (
                 <div className="p-8 text-center text-sm text-slate-400">
-                  Conecte sua UTMify para ver o ranking de campanhas.
+                  Nenhuma campanha encontrada no período selecionado.
                 </div>
               ) : (
                 <table className="w-full">
@@ -280,20 +326,25 @@ export default function DashboardPage() {
             <div className="p-5">
               {loading ? (
                 <div className="space-y-3"><div className="h-16 bg-slate-100 rounded-lg animate-pulse"/><div className="h-24 bg-slate-100 rounded-lg animate-pulse"/></div>
+              ) : !metrics ? (
+                <div className="text-center py-6">
+                  <p className="text-sm text-slate-400">Sem dados para análise.</p>
+                  <p className="text-xs text-slate-300 mt-1">Conecte a UTMify para diagnósticos automáticos.</p>
+                </div>
               ) : (
                 <>
                   <p className="text-[12.5px] text-slate-500 leading-relaxed mb-4">
-                    {metrics && metrics.roas >= 2
+                    {metrics.roas >= 2
                       ? <>A semana foi <strong className="text-green-600">positiva em ROAS</strong>. O período analisado mostra {metrics.vendas} vendas aprovadas com ROAS {metrics.roas.toFixed(2)}×.</>
                       : <>Semana com <strong className="text-amber-500">oportunidade de melhoria</strong>. Revise criativos e audiências para melhorar o ROAS.</>
                     }
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { label: 'Principal ganho',  value: metrics ? `ROAS ${metrics.roas.toFixed(2)}×` : '—',                    color: 'text-green-600' },
-                      { label: 'Principal risco',  value: metrics && metrics.reembolso > 3 ? `Reembolso ${metrics.reembolso.toFixed(1)}%` : 'Monitorar CPA', color: 'text-red-500' },
-                      { label: 'Gasto total',      value: metrics ? formatCurrency(metrics.gasto) : '—',                         color: 'text-slate-700' },
-                      { label: 'Budget ocioso',    value: '—',                                                                    color: 'text-amber-500' },
+                      { label: 'Principal ganho',  value: `ROAS ${metrics.roas.toFixed(2)}×`,                                                 color: 'text-green-600' },
+                      { label: 'Principal risco',  value: metrics.reembolso > 3 ? `Reembolso ${metrics.reembolso.toFixed(1)}%` : 'Monitorar CPA', color: 'text-red-500' },
+                      { label: 'Gasto total',      value: formatCurrency(metrics.gasto),                                                       color: 'text-slate-700' },
+                      { label: 'Budget ocioso',    value: '—',                                                                                 color: 'text-amber-500' },
                     ].map((d) => (
                       <div key={d.label} className="bg-slate-50 rounded-lg p-3">
                         <div className="text-[10.5px] font-medium text-slate-400 uppercase tracking-wide mb-1">{d.label}</div>

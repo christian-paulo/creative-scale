@@ -98,7 +98,7 @@ export function TopBar({
                   <ChevronDown className="w-3 h-3 text-slate-400" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuContent align="start" className="w-48 z-50">
                 {PRESETS.map((preset) => (
                   <DropdownMenuItem
                     key={preset.label}

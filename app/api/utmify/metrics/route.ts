@@ -138,7 +138,7 @@ export async function GET(request: Request) {
       .single()
 
     if (!workspace?.utmify_api_key || !workspace.utmify_connected) {
-      return NextResponse.json(getMockData(level))
+      return NextResponse.json({ items: [], summary: null, connected: false, level })
     }
 
     const cacheKey = `${level}-${start}-${end}`
@@ -152,7 +152,7 @@ export async function GET(request: Request) {
       .single()
 
     if (cached && new Date(cached.expires_at) > new Date()) {
-      return NextResponse.json(cached.data)
+      return NextResponse.json({ ...(cached.data as object), connected: true })
     }
 
     // Fetch — prefer MCP, fall back to REST
@@ -184,18 +184,9 @@ export async function GET(request: Request) {
       { onConflict: 'workspace_id,cache_key' }
     )
 
-    return NextResponse.json(normalized)
+    return NextResponse.json({ ...(normalized as object), connected: true })
   } catch (error) {
     console.error('Metrics error:', error)
-    return NextResponse.json({ error: 'Erro ao buscar métricas' }, { status: 500 })
-  }
-}
-
-function getMockData(level: string) {
-  return {
-    items: [],
-    summary: { spend: 12400, revenue: 48320, roas: 3.9, cpa: 42, conversions: 295, clicks: 4820, impressions: 142000, ctr: 3.4 },
-    level,
-    mock: true,
+    return NextResponse.json({ items: [], summary: null, connected: false, level, error: 'Erro ao buscar métricas' })
   }
 }
