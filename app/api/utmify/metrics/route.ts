@@ -187,6 +187,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ ...(normalized as object), connected: true })
   } catch (error) {
     console.error('Metrics error:', error)
-    return NextResponse.json({ items: [], summary: null, connected: false, level, error: 'Erro ao buscar métricas' })
+    return NextResponse.json({ items: [], summary: null, connected: false, error: 'Erro ao buscar métricas' })
   }
 }
