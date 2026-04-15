@@ -401,7 +401,22 @@ export default function OnboardingPage() {
   }
 
   const prev = () => setStep((s) => Math.max(1, s - 1))
-  const skip = () => setStep((s) => Math.min(6, s + 1))
+  const skip = async () => {
+    if (step === 6) {
+      // Last step — skip just marks onboarding as done and finishes
+      setSaving(true)
+      try {
+        if (workspaceId) {
+          await supabase.from('workspaces').update({ onboarding_done: true }).eq('id', workspaceId)
+        }
+        setDone(true)
+      } finally {
+        setSaving(false)
+      }
+      return
+    }
+    setStep((s) => Math.min(6, s + 1))
+  }
 
   // ── Success screen ──
   if (done) {

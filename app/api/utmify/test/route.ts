@@ -35,22 +35,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Token inválido. Cole a URL MCP ou o token diretamente.' }, { status: 400 })
     }
 
-    // Single request with hard timeout — avoids freeze
+    // Use campaigns endpoint with last 7 days — same as dashboard uses
+    const today = new Date()
+    const sevenDaysAgo = new Date(today)
+    sevenDaysAgo.setDate(today.getDate() - 7)
+    const fmt = (d: Date) => d.toISOString().split('T')[0]
+    const url = `https://api.utmify.com.br/api-credentials/ads/campaigns?start_date=${fmt(sevenDaysAgo)}&end_date=${fmt(today)}`
+
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 8000)
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
 
     let res: Response
     try {
-      res = await fetch(
-        'https://api.utmify.com.br/api-credentials/dashboard/overview',
-        {
-          headers: {
-            'x-api-token': key,
-            'Content-Type': 'application/json',
-          },
-          signal: controller.signal,
-        }
-      )
+      res = await fetch(url, {
+        headers: { 'x-api-token': key },
+        signal: controller.signal,
+      })
     } finally {
       clearTimeout(timeoutId)
     }
@@ -59,23 +59,17 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: false,
         error: res.status === 401 || res.status === 403
-          ? 'API key inválida ou sem permissão'
+          ? 'API key inválida ou sem permissão. Verifique o token em UTMify → Configurações → Integrações → API.'
           : `UTMify retornou erro ${res.status}`,
       })
     }
 
     const data = await res.json()
-
-    // Extract campaigns count from overview if available — no second request
-    const campaigns_count =
-      data?.campaigns_count ??
-      data?.total_campaigns ??
-      data?.data?.length ??
-      data?.campaigns?.length ??
-      0
+    const items = Array.isArray(data) ? data : (data?.data ?? [])
+    const campaigns_count = Array.isArray(items) ? items.length : 0
 
     // Return the clean token so the frontend saves just the token, not the full URL
-    return NextResponse.json({ success: true, campaigns_count, overview: data, token: key })
+    return NextResponse.json({ success: true, campaigns_count, token: key })
   } catch (error: unknown) {
     console.error('UTMify test error:', error)
 
