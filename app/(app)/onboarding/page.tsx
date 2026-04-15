@@ -66,6 +66,7 @@ export default function OnboardingPage() {
   const [utmifyKey, setUtmifyKey] = useState('')
   const [utmifyStatus, setUtmifyStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
   const [utmifyCount, setUtmifyCount] = useState(0)
+  const [utmifyError, setUtmifyError] = useState('')
 
   // Step 3
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null)
@@ -118,17 +119,24 @@ export default function OnboardingPage() {
 
   const testUtmify = async () => {
     setUtmifyStatus('testing')
-    const res = await fetch('/api/utmify/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ api_key: utmifyKey }),
-    })
-    const data = await res.json()
-    if (data.success) {
-      setUtmifyStatus('ok')
-      setUtmifyCount(data.campaigns_count ?? 0)
-    } else {
+    setUtmifyError('')
+    try {
+      const res = await fetch('/api/utmify/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: utmifyKey.trim() }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setUtmifyStatus('ok')
+        setUtmifyCount(data.campaigns_count ?? 0)
+      } else {
+        setUtmifyStatus('error')
+        setUtmifyError(data.error ?? 'API key inválida. Verifique e tente novamente.')
+      }
+    } catch {
       setUtmifyStatus('error')
+      setUtmifyError('Erro de conexão. Verifique sua internet e tente novamente.')
     }
   }
 
@@ -234,16 +242,19 @@ export default function OnboardingPage() {
 
   const next = async () => {
     setSaving(true)
-    if (step === 1) await saveStep1()
-    if (step === 2) await saveStep2()
-    if (step === 3) await saveStep3()
-    if (step === 4) await saveStep4()
-    if (step === 5) await saveStep5()
-    setSaving(false)
-    if (step < 6) setStep(step + 1)
-    if (step === 5) {
-      // Move to plan step
-      setStep(6)
+    try {
+      if (step === 1) await saveStep1()
+      if (step === 2) await saveStep2()
+      if (step === 3) await saveStep3()
+      if (step === 4) await saveStep4()
+      if (step === 5) await saveStep5()
+      setStep((s) => Math.min(6, s + 1))
+    } catch (err) {
+      console.error('Save error:', err)
+      // Don't block navigation on non-critical save errors
+      setStep((s) => Math.min(6, s + 1))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -376,7 +387,13 @@ export default function OnboardingPage() {
                       <Input
                         placeholder="Cole sua API key aqui"
                         value={utmifyKey}
-                        onChange={(e) => setUtmifyKey(e.target.value)}
+                        onChange={(e) => {
+                          setUtmifyKey(e.target.value)
+                          if (utmifyStatus !== 'idle') {
+                            setUtmifyStatus('idle')
+                            setUtmifyError('')
+                          }
+                        }}
                         className="flex-1"
                       />
                       <Button
@@ -394,11 +411,15 @@ export default function OnboardingPage() {
                     </div>
                     {utmifyStatus === 'ok' && (
                       <p className="text-sm text-green-600 flex items-center gap-1">
-                        <CheckCircle2 className="w-4 h-4" /> Conectado! {utmifyCount} campanhas encontradas.
+                        <CheckCircle2 className="w-4 h-4" />
+                        Conectado!{utmifyCount > 0 ? ` ${utmifyCount} campanhas encontradas.` : ' Conta verificada com sucesso.'}
                       </p>
                     )}
                     {utmifyStatus === 'error' && (
-                      <p className="text-sm text-red-500">API key inválida. Verifique e tente novamente.</p>
+                      <p className="text-sm text-red-500">{utmifyError || 'API key inválida. Verifique e tente novamente.'}</p>
+                    )}
+                    {utmifyStatus === 'testing' && (
+                      <p className="text-sm text-slate-500">Verificando conexão com UTMify...</p>
                     )}
                   </div>
                 )}
