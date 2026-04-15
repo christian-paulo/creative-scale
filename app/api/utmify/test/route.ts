@@ -2,22 +2,39 @@ import { NextResponse } from 'next/server'
 
 export const maxDuration = 15
 
-/**
- * Accepts either:
- *   - A plain token:  "BdNc4uBkEUUyVma1QSaDD2a3hmx4Ew6"
- *   - An MCP URL:    "https://mcp.utmify.com.br/mcp/?token=BdNc4uBkEUUyVma1QSaDD2a3hmx4Ew6"
- */
 function extractToken(input: string): string {
-  if (input.startsWith('http')) {
+  const trimmed = input.trim()
+  if (trimmed.startsWith('http')) {
     try {
-      const url = new URL(input)
-      return url.searchParams.get('token') ?? ''
+      const url = new URL(trimmed)
+      // Try ?token= param first
+      const tokenParam = url.searchParams.get('token')
+      if (tokenParam) return tokenParam.trim()
+      // Try /token/ path segment
+      const parts = url.pathname.split('/').filter(Boolean)
+      const tokenIdx = parts.findIndex(p => p === 'token')
+      if (tokenIdx !== -1 && parts[tokenIdx + 1]) return parts[tokenIdx + 1].trim()
     } catch {
-      return ''
+      // fall through
     }
   }
-  return input
+  return trimmed
 }
+
+const today = () => new Date().toISOString().split('T')[0]
+const weekAgo = () => {
+  const d = new Date()
+  d.setDate(d.getDate() - 7)
+  return d.toISOString().split('T')[0]
+}
+
+// Endpoints to try in order — some plans may not have access to all
+const ENDPOINTS = [
+  `https://api.utmify.com.br/api-credentials/orders?start_date=${weekAgo()}&end_date=${today()}`,
+  `https://api.utmify.com.br/api-credentials/ads/campaigns?start_date=${weekAgo()}&end_date=${today()}`,
+  `https://api.utmify.com.br/api-credentials/dashboard/overview?start_date=${weekAgo()}&end_date=${today()}`,
+  `https://api.utmify.com.br/api-credentials/dashboard/overview`,
+]
 
 export async function POST(request: Request) {
   try {
@@ -27,52 +44,80 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'API key obrigatória' }, { status: 400 })
     }
 
-    // Accept both plain token and full MCP URL formats:
-    // https://mcp.utmify.com.br/mcp/?token=TOKEN
-    const key = extractToken(api_key.trim())
+    const key = extractToken(api_key)
 
     if (!key || key.length < 8) {
-      return NextResponse.json({ success: false, error: 'Token inválido. Cole a URL MCP ou o token diretamente.' }, { status: 400 })
+      return NextResponse.json({
+        success: false,
+        error: 'Token inválido. Cole a URL MCP completa ou o token direto.',
+      }, { status: 400 })
     }
 
-    // Use campaigns endpoint with last 7 days — same as dashboard uses
-    const today = new Date()
-    const sevenDaysAgo = new Date(today)
-    sevenDaysAgo.setDate(today.getDate() - 7)
-    const fmt = (d: Date) => d.toISOString().split('T')[0]
-    const url = `https://api.utmify.com.br/api-credentials/ads/campaigns?start_date=${fmt(sevenDaysAgo)}&end_date=${fmt(today)}`
-
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
 
-    let res: Response
+    let lastStatus = 0
+    let lastBody = ''
+
     try {
-      res = await fetch(url, {
-        headers: { 'x-api-token': key },
-        signal: controller.signal,
-      })
+      for (const url of ENDPOINTS) {
+        let res: Response
+        try {
+          res = await fetch(url, {
+            headers: {
+              'x-api-token': key,
+              'Accept': 'application/json',
+            },
+            signal: controller.signal,
+          })
+        } catch {
+          continue
+        }
+
+        lastStatus = res.status
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}))
+          const items = Array.isArray(data) ? data : (data?.data ?? data?.orders ?? [])
+          const count = Array.isArray(items) ? items.length : 0
+          return NextResponse.json({ success: true, campaigns_count: count, token: key })
+        }
+
+        // Read body for debugging — don't expose to user but use for better messages
+        try { lastBody = await res.text() } catch { lastBody = '' }
+
+        // 401/403 means auth failure — token is wrong, no point trying other endpoints
+        if (res.status === 401 || res.status === 403) break
+        // 404 means endpoint not found — try next
+        if (res.status === 404) continue
+      }
     } finally {
       clearTimeout(timeoutId)
     }
 
-    if (!res.ok) {
+    // Build helpful error based on what we got
+    if (lastStatus === 401 || lastStatus === 403) {
       return NextResponse.json({
         success: false,
-        error: res.status === 401 || res.status === 403
-          ? 'API key inválida ou sem permissão. Verifique o token em UTMify → Configurações → Integrações → API.'
-          : `UTMify retornou erro ${res.status}`,
+        error:
+          'Token rejeitado pela UTMify. Certifique-se de copiar o token de API REST ' +
+          '(UTMify → Configurações → API → Chave de API), não a URL MCP do Claude/ChatGPT.',
       })
     }
 
-    const data = await res.json()
-    const items = Array.isArray(data) ? data : (data?.data ?? [])
-    const campaigns_count = Array.isArray(items) ? items.length : 0
+    if (lastStatus === 404) {
+      return NextResponse.json({
+        success: false,
+        error: 'Nenhum endpoint UTMify respondeu. Tente copiar apenas o token, sem a URL completa.',
+      })
+    }
 
-    // Return the clean token so the frontend saves just the token, not the full URL
-    return NextResponse.json({ success: true, campaigns_count, token: key })
+    return NextResponse.json({
+      success: false,
+      error: `UTMify retornou status ${lastStatus}. Tente novamente ou contate o suporte.`,
+    })
+
   } catch (error: unknown) {
-    console.error('UTMify test error:', error)
-
     const isTimeout =
       error instanceof Error &&
       (error.name === 'AbortError' || error.message.includes('abort'))
@@ -80,8 +125,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: false,
       error: isTimeout
-        ? 'Tempo limite excedido. Verifique sua conexão e tente novamente.'
-        : 'Erro ao conectar com UTMify. Verifique a API key.',
+        ? 'Tempo limite excedido. Verifique sua conexão.'
+        : 'Erro inesperado ao conectar com UTMify.',
     })
   }
 }

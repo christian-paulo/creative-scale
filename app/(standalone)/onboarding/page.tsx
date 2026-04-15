@@ -612,10 +612,10 @@ export default function OnboardingPage() {
                 {dataSource === 'utmify' && (
                   <div className="bg-white rounded-xl border border-slate-200 p-5">
                     <p className="font-semibold text-slate-900 mb-1">Conectar UTMify</p>
-                    <p className="text-sm text-slate-500 mb-4">Cole a URL MCP ou o token direto. Encontre em: UTMify → Configurações → Integrações → API.</p>
+                    <p className="text-sm text-slate-500 mb-4">Cole o token de API REST da UTMify. Encontre em: <strong>UTMify → Configurações → API → Chave de API</strong>. Não use a URL MCP do Claude/ChatGPT — esse é um token diferente.</p>
                     <div className="flex gap-2 mb-3">
                       <Input
-                        placeholder="https://mcp.utmify.com.br/mcp/?token=... ou o token diretamente"
+                        placeholder="Cole aqui o token de API REST da UTMify"
                         value={utmifyKey}
                         onChange={(e) => {
                           setUtmifyKey(e.target.value)

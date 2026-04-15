@@ -270,7 +270,8 @@ export default function ConfiguracoesPage() {
                 <div>
                   <label className={labelCls}>Token ou URL MCP da UTMify</label>
                   <p className="text-[11.5px] text-slate-400 mb-2">
-                    Encontre em: UTMify → Configurações → Integrações → API
+                    Encontre em: <strong className="text-slate-600">UTMify → Configurações → API → Chave de API</strong>.
+                    Não use a URL MCP do Claude/ChatGPT — esse é um token diferente.
                   </p>
                   <div className="flex gap-2">
                     <input
